@@ -1,0 +1,28 @@
+name: Publish portable GUI release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify archives and publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($line in Get-Content release/SHA256SUMS.txt) {
+            if ($line -match '^([a-f0-9]{64})  (.+)$') {
+              $expected = $Matches[1]
+              $file = Join-Path release $Matches[2]
+              if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+                throw "Checksum mismatch: $file"
+              }
+            }
+          }
+          gh release create v1.1.0 release/LeviAfan-Zapret-1.1.0-Windows.zip release/LeviAfan-Zapret-1.1.0-Windows.rar release/SHA256SUMS.txt --title 'LeviAfan GUI 1.1.0 — Windows portable' --notes-file release/release-notes.md --target $env:GITHUB_SHA --latest
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publishing failed' }

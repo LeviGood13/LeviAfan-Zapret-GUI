@@ -1,0 +1,39 @@
+name: Reset repository history
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cleanup-history.yml']
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'Initial commit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Keep current files in one initial commit and retain the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = gh api "repos/$env:GH_REPO/git/ref/heads/main" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'Branch changed; refusing to replace newer work' }
+          $tag = gh api "repos/$env:GH_REPO/git/ref/tags/v1.1.0" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0) { throw 'Release tag not found' }
+          git config user.name 'LeviAfan'
+          git config user.email '142181110+LeviGood13@users.noreply.github.com'
+          $tree = git rev-parse 'HEAD^{tree}'
+          $initial = git commit-tree $tree -m 'Initial commit'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot create initial commit' }
+          git push --atomic "--force-with-lease=refs/heads/main:$head" "--force-with-lease=refs/tags/v1.1.0:$tag" origin "${initial}:refs/heads/main" "${initial}:refs/tags/v1.1.0"
+          if ($LASTEXITCODE -ne 0) { throw 'History replacement rejected' }
+          gh release edit v1.1.0 --notes-file release/release-notes.md --target $initial
+          if ($LASTEXITCODE -ne 0) { throw 'Release description update failed' }
+          $parents = gh api "repos/$env:GH_REPO/git/commits/$initial" --jq '.parents | length'
+          if ($LASTEXITCODE -ne 0 -or $parents -ne '0') { throw 'History validation failed' }
+          Write-Output "Verified initial commit: $initial"
